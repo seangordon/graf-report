@@ -1,9 +1,5 @@
-#!/usr/bin/python
+#!/usr/bin/python3
 # coding: utf8
-
-# Grafana Report Generator - email grafana reports based on HTML templates
-# 2018-12-04: v0.1 - Initial Version
-
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.mime.image import MIMEImage
@@ -20,6 +16,10 @@ import binascii
 
 # Location for Temporary files
 TEMP = '/tmp/'
+
+    # v1.1 - Added Static Panel Renderer URL Path segment as a parameter (-Z)
+    #        In the latest version of Grafana renderer a unique element is added to the URL for each dashboard
+    #        and this must be inserted into the renderer request URL
 
     # Daily Level Report parameter example
     # min stat - ('water-24h-view',6,400,100)
@@ -63,7 +63,7 @@ HEIGHT = 3
 
 def mail_type(s):
     if not re.match(r"[^@^\s]+@[^@^\s]+\.[^@\s]+", s):
-         raise argparse.ArgumentTypeError("The mail is not a valid email: [" + s + "]")
+         raise argparse.ArgumentTypeError('The mail is not a valid email')
     return s
 
 def panel_type(s):
@@ -71,7 +71,7 @@ def panel_type(s):
         #strip the brackets from the panel tuple
         s = s.replace("(", "")
         s = s.replace(")", "")
-        
+
         dashboard, panelId, width, height = s.split(',')
 
         try:
@@ -85,7 +85,7 @@ def panel_type(s):
         try:
             y = int(height)
         except ValueError:
-            raise argparse.ArgumentTypeError("Height must be an integer: [" + s + "]") 
+            raise argparse.ArgumentTypeError("Height must be an integer: [" + s + "]")
     except:
          raise argparse.ArgumentTypeError("Every panel must be (<str>dashboard,<int>panelId,<int>width,<int>height): [" + s + "]")
     return dashboard, panelId, width, height
@@ -116,6 +116,14 @@ def parse_args():
                     dest="mailhost", type=str,
                     help="Mailhost hostname or IP.",
                     required=True)
+    parser.add_argument("-u", "--user",
+                    dest="user", type=str,
+                    help="Mail Server Login user ID.",
+                    required=True)
+    parser.add_argument("-p", "--password",
+                    dest="password", type=str,
+                    help="Mail Server Login Password.",
+                    required=True)
     parser.add_argument("-G", "--grafana_server",
                     dest="grafana_server",
                     help="Grafana server & port, ex: http://grafana.test:3000",
@@ -124,11 +132,15 @@ def parse_args():
                     dest="api_token", type=str,
                     help="Grafana API Token to access the dashboard.",
                     required=True)
+    parser.add_argument("-Z", "--panel_token",
+                    dest="panel_token", type=str,
+                    help="Grafana static panel path to access the dashboard.",
+                    required=True)
     parser.add_argument("-P", "--panel_list",
                     dest="panel_list",
                     nargs='+', type=panel_type,
                     help="Tuple of Grafana dashboard Id, panelId, width and height; every tuple has to be separated by a space, ex ('test',1,400,100) ('dashboard2',15,400,100) ...",
-                    required=True) 
+                    required=True)
     return parser.parse_args()
 
 def prepare(from_addr, subject_line, template_file):
@@ -141,12 +153,12 @@ def prepare(from_addr, subject_line, template_file):
     msgRoot.preamble = 'This is a multi-part message in MIME format.'
 
     msgAlternative = MIMEMultipart('alternative')
-    
+
     msgTemplate = load_template(template_file)
     msgText = MIMEText(msgTemplate, 'html')
-    
+
     msgAlternative.attach(msgText)
-    
+
     msgRoot.attach(msgAlternative)
 
     return msgRoot
@@ -154,8 +166,8 @@ def prepare(from_addr, subject_line, template_file):
 def create_filename(dashboard, panelId):
     return 'img_' + dashboard + '-' + panelId + '.png'
 
-def download(grafana_server, dashboard, panelId, width, height, img_file, api_token):
-    url = (grafana_server + '/render/dashboard-solo/db/' + dashboard + 
+def download(grafana_server, dashboard, panelId, width, height, img_file, api_token, panel_token):
+    url = (grafana_server + '/render/d-solo/' + panel_token + '/' + dashboard +
             '?panelId=' + panelId +
             '&width=' + width +
             '&height=' + height +
@@ -169,10 +181,11 @@ def download(grafana_server, dashboard, panelId, width, height, img_file, api_to
             shutil.copyfileobj(r.raw, picture)
     del r
 
-def send(msgRoot, mail_list, mailhost, strFrom):
+def send(msgRoot, mail_list, mailhost, user, password, strFrom):
     msgRoot['To'] = ", ".join(mail_list)
     smtp = smtplib.SMTP()
-    smtp.connect(mailhost)
+    smtp.connect(mailhost, 25)
+    smtp.login(user, password)
     smtp.sendmail(strFrom, mail_list, msgRoot.as_string())
     smtp.quit()
 
@@ -206,16 +219,10 @@ if __name__ == '__main__':
     for panel in args.panel_list:
         # print(panel)
         img_name = create_filename(panel[DASHBOARD], panel[PANEL_ID])
-        download(args.grafana_server, panel[DASHBOARD], panel[PANEL_ID], panel[WIDTH], panel[HEIGHT], img_name, args.api_token )
+        download(args.grafana_server, panel[DASHBOARD], panel[PANEL_ID], panel[WIDTH], panel[HEIGHT], img_name, args.api_token, args.panel_token )
         attach_img(msgRoot, img_name)
         # tidy up the temporary file
         os.remove(TEMP + img_name)
 
     # Send one email to all listed recipients
-    send(msgRoot, args.mail_list, args.mailhost, strFrom)
-
-#    # tidy up the temporary files
-#    for panel in args.panel_list:
-#        img_name = create_filename(panel[DASHBOARD], panel[PANEL_ID])
-#        print("Removing temp file: " + TEMP + img_name)
-#        os.remove(TEMP + img_name)
+    send(msgRoot, args.mail_list, args.mailhost, args.user, args.password, strFrom)

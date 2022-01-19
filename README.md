@@ -1,4 +1,7 @@
 # graf-report
+     v1.1 - Added Static Panel Renderer URL Path segment as a parameter (-Z)
+            In the latest version of Grafana renderer a unique element is added to the URL for each dashboard
+            and this must be inserted into the renderer request URL
 Python App to generate simple e-mail reports from Grafana dashboards.
 
 Enables dashboards to be sent as e-mail with embedded images.
